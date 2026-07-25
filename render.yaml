@@ -1,0 +1,67 @@
+# Render Blueprint для Non-Stop Visa бота.
+#
+# Как применить: Render Dashboard → New → Blueprint → выбрать этот репозиторий.
+# Render прочитает файл, создаст сервис и спросит значения секретов
+# (те, у которых `sync: false`) — в репозиторий они не попадают.
+#
+# ВАЖНЫЕ РЕШЕНИЯ, зафиксированные здесь:
+#
+# 1. `type: worker` — фоновый воркер, а не web service. Бот работает в режиме
+#    polling: входящих HTTP-запросов у него нет, порт слушать не нужно.
+#    Free-тариф воркеры не поддерживает — нужен платный план.
+#    Web service на free-тарифе не подходит: Render усыпляет его после
+#    15 минут без входящего трафика, и бот перестаёт отвечать.
+#
+# 2. `disk` — обязателен. Без persistent disk файловая система Render
+#    эфемерная: при каждом деплое и рестарте стирается всё, включая
+#    SQLite-базу с лидами, историей диалогов и флагами follow-up.
+#    Диск монтируется в /var/data, туда же указывает DB_PATH.
+#
+# 3. Один инстанс. Telegram позволяет только одно соединение getUpdates на
+#    токен: второй инстанс вызовет «Conflict: terminated by other getUpdates
+#    request». Подключённый диск и так запрещает масштабирование, но
+#    автоскейлинг для этого сервиса включать нельзя.
+#
+# 4. `region: frankfurt` — ближайший к Армении регион из доступных
+#    (остальные: oregon, ohio, virginia, singapore).
+
+services:
+  - name: autovisa-bot
+    type: worker
+    runtime: python
+    plan: starter
+    region: frankfurt
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m bot.main
+
+    # Версия Python берётся из файла .python-version в корне репозитория.
+    autoDeploy: true
+
+    disk:
+      name: autovisa-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # --- Путь к БД на persistent disk (не менять) ---
+      - key: DB_PATH
+        value: /var/data/autovisa.db
+
+      # --- Секреты: Render запросит значения при создании Blueprint ---
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MANAGER_CHAT_ID
+        sync: false
+
+      # --- Настройки со значениями по умолчанию ---
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini
+      - key: OPENAI_EFFORT
+        value: low
+      - key: VOICE_ENABLED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO

@@ -1,0 +1,20 @@
+# Telegram Bot API (async, v21+ — нужен для kwarg `proxy=` в HTTPXRequest).
+# Extra `rate-limiter` (пакет aiolimiter) нужен для AIORateLimiter: он держит
+# исходящие сообщения в лимитах Telegram, чтобы бот не ловил 429 при
+# одновременных ответах клиенту и уведомлениях в чат менеджеров.
+python-telegram-bot[rate-limiter]>=21.0,<22.0
+
+# OpenAI SDK: Responses API (текст) + Audio API (распознавание и синтез речи)
+openai>=2.0.0
+
+# Планировщик follow-up напоминаний и уборки журнала api_calls
+APScheduler>=3.10,<4.0
+
+# Загрузка секретов из .env
+python-dotenv>=1.0.0
+
+# SQLite — stdlib (sqlite3), внешних зависимостей не требует.
+# Блокирующие вызовы обёрнуты в asyncio.to_thread (см. bot/db.py).
+#
+# Системных зависимостей нет: голосовые сообщения проходят без конвертации
+# (Telegram и OpenAI сходятся на Ogg/Opus), ffmpeg не нужен.
