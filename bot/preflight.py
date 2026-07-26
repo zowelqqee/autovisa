@@ -48,10 +48,16 @@ async def check_env() -> tuple[bool, dict[str, str]]:
 
 async def check_openai(api_key: str) -> bool:
     print("\nOpenAI")
+    import httpx
     from openai import AsyncOpenAI
 
     model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-    client = AsyncOpenAI(api_key=api_key)
+    client_kwargs: dict = {"api_key": api_key}
+    proxy_url = os.getenv("OPENAI_PROXY_URL")
+    if proxy_url:
+        print(f"{OK} используется прокси: …{proxy_url[-12:]}")
+        client_kwargs["http_client"] = httpx.AsyncClient(proxy=proxy_url)
+    client = AsyncOpenAI(**client_kwargs)
     try:
         available = {m.id async for m in client.models.list()}
     except Exception as exc:  # noqa: BLE001
