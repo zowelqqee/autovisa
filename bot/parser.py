@@ -305,8 +305,9 @@ def parse_model_response(raw: str) -> ParsedResponse:
     return ParsedResponse(text=text, lead=lead, escalation=escalation)
 
 
-# Сообщения клиенту уходят с parse_mode=HTML (см. bot/handlers.py), поэтому
-# markdown модели конвертируем в теги Telegram, а не вырезаем. Одиночное
+# Сообщения клиенту уходят с parse_mode=HTML (см. bot/handlers.py). Модель
+# иногда выделяет жирный/курсив markdown-ом (**/*), а иногда пишет готовые
+# HTML-теги <b>/<i> напрямую — поддерживаем оба варианта. Одиночное
 # подчёркивание не трогаем — оно встречается в телеграм-никах вида
 # @ivan_petrov.
 _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
@@ -314,6 +315,14 @@ _MD_ITALIC_RE = re.compile(r"\*(?!\s)([^*\n]+?)(?<!\s)\*")
 _MD_CODE_RE = re.compile(r"`{1,3}([^`]+)`{1,3}", re.DOTALL)
 _MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
 _MD_BULLET_RE = re.compile(r"^\s{0,3}\*\s+", re.MULTILINE)
+
+# Готовые HTML-теги от модели: до экранирования прячем их за плейсхолдерами
+# (символы из Private Use Area — никогда не встречаются в обычном тексте),
+# иначе экранирование превратило бы `<b>` в видимый клиенту текст «<b>».
+_HTML_BOLD_RE = re.compile(r"<(?:b|strong)>(.*?)</(?:b|strong)>", re.IGNORECASE | re.DOTALL)
+_HTML_ITALIC_RE = re.compile(r"<(?:i|em)>(.*?)</(?:i|em)>", re.IGNORECASE | re.DOTALL)
+_PH_B_OPEN, _PH_B_CLOSE = "", ""
+_PH_I_OPEN, _PH_I_CLOSE = "", ""
 
 
 def _escape_html(text: str) -> str:
@@ -323,18 +332,26 @@ def _escape_html(text: str) -> str:
 
 
 def markdown_to_telegram_html(text: str) -> str:
-    """Конвертирует markdown модели в HTML-теги, которые понимает Telegram.
+    """Конвертирует разметку модели (markdown и/или готовый HTML) в теги,
+    которые понимает Telegram.
 
-    Сначала экранируются HTML-спецсимволы (иначе `<`/`>`/`&` в тексте клиента
-    сломали бы parse_mode=HTML), и только потом markdown-маркеры превращаются
-    в теги — экранирование их не затрагивает, это разные символы.
+    Порядок важен: сначала настоящие HTML-теги модели прячутся за
+    плейсхолдерами, потом экранируются HTML-спецсимволы (иначе `<`/`>`/`&`
+    в тексте сломали бы parse_mode=HTML), потом markdown-маркеры становятся
+    тегами, и в конце плейсхолдеры возвращаются как настоящие теги.
     """
+    text = _HTML_BOLD_RE.sub(lambda m: f"{_PH_B_OPEN}{m.group(1)}{_PH_B_CLOSE}", text)
+    text = _HTML_ITALIC_RE.sub(lambda m: f"{_PH_I_OPEN}{m.group(1)}{_PH_I_CLOSE}", text)
+
     text = _escape_html(text)
     text = _MD_BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", text)
     text = _MD_BULLET_RE.sub("• ", text)
     text = _MD_ITALIC_RE.sub(r"<i>\1</i>", text)
     text = _MD_CODE_RE.sub(r"\1", text)
     text = _MD_HEADING_RE.sub("", text)
+
+    text = text.replace(_PH_B_OPEN, "<b>").replace(_PH_B_CLOSE, "</b>")
+    text = text.replace(_PH_I_OPEN, "<i>").replace(_PH_I_CLOSE, "</i>")
     return text
 
 
