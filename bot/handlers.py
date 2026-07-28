@@ -356,6 +356,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 # Расшифровка в подписи: удобно читать в шумном месте и видно,
                 # что именно бот ответил.
                 caption=reply[:1000],
+                parse_mode=ParseMode.HTML,
             )
         except Forbidden:
             logger.info("Пользователь заблокировал бота: chat_id=%s", chat.id)
@@ -510,10 +511,18 @@ async def _handle_quota_exceeded(
 
 
 async def _send_long(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
-    """Отправляет текст, разбивая его на части по лимиту Telegram."""
+    """Отправляет текст, разбивая его на части по лимиту Telegram.
+
+    parse_mode=HTML: ответ модели уже прошёл через
+    `parser.markdown_to_telegram_html()` (экранирование + теги `<b>`/`<i>`),
+    поэтому Telegram отрисовывает жирный и курсив. Статические тексты-заглушки
+    (квоты, fallback) — обычный текст без разметки, HTML им не мешает.
+    """
     for chunk in _split_text(text):
         try:
-            await context.bot.send_message(chat_id=chat_id, text=chunk)
+            await context.bot.send_message(
+                chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML
+            )
         except Forbidden:
             logger.info("Пользователь заблокировал бота: chat_id=%s", chat_id)
             return

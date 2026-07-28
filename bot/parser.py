@@ -299,30 +299,42 @@ def parse_model_response(raw: str) -> ParsedResponse:
 
     # Подчищаем возможные висячие закрывающие теги и лишние пустые строки.
     text = re.sub(r"\[/?\s*(?:LEAD_CAPTURED|ESCALATE)[^\]]*\]", "", text, flags=re.IGNORECASE)
-    text = strip_markdown(text)
+    text = markdown_to_telegram_html(text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
     return ParsedResponse(text=text, lead=lead, escalation=escalation)
 
 
-# Разметка, которую модель иногда добавляет по привычке. Сообщения уходят
-# простым текстом (без parse_mode), поэтому «звёздочки» клиент увидел бы
-# буквально. Одиночное подчёркивание не трогаем — оно встречается в
-# телеграм-никах вида @ivan_petrov.
-_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
-_MD_UNDERLINE_RE = re.compile(r"__(.+?)__", re.DOTALL)
+# Сообщения клиенту уходят с parse_mode=HTML (см. bot/handlers.py), поэтому
+# markdown модели конвертируем в теги Telegram, а не вырезаем. Одиночное
+# подчёркивание не трогаем — оно встречается в телеграм-никах вида
+# @ivan_petrov.
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
+_MD_ITALIC_RE = re.compile(r"\*(?!\s)([^*\n]+?)(?<!\s)\*")
 _MD_CODE_RE = re.compile(r"`{1,3}([^`]+)`{1,3}", re.DOTALL)
 _MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
 _MD_BULLET_RE = re.compile(r"^\s{0,3}\*\s+", re.MULTILINE)
 
 
-def strip_markdown(text: str) -> str:
-    """Убирает markdown-разметку из текста, который уйдёт клиенту как есть."""
-    text = _MD_BOLD_RE.sub(r"\1", text)
-    text = _MD_UNDERLINE_RE.sub(r"\1", text)
+def _escape_html(text: str) -> str:
+    """Экранирование для parse_mode=HTML — в отличие от `_esc()`, не подменяет
+    пустую строку на «—»: здесь это тело сообщения, а не поле карточки."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    """Конвертирует markdown модели в HTML-теги, которые понимает Telegram.
+
+    Сначала экранируются HTML-спецсимволы (иначе `<`/`>`/`&` в тексте клиента
+    сломали бы parse_mode=HTML), и только потом markdown-маркеры превращаются
+    в теги — экранирование их не затрагивает, это разные символы.
+    """
+    text = _escape_html(text)
+    text = _MD_BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", text)
+    text = _MD_BULLET_RE.sub("• ", text)
+    text = _MD_ITALIC_RE.sub(r"<i>\1</i>", text)
     text = _MD_CODE_RE.sub(r"\1", text)
     text = _MD_HEADING_RE.sub("", text)
-    text = _MD_BULLET_RE.sub("• ", text)
     return text
 
 
