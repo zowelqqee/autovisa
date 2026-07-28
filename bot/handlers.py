@@ -62,22 +62,21 @@ ESCALATION_HISTORY_SIZE = 5
 # Формулировки не упоминают лимиты и модель: для клиента это просто
 # занятость, а не техническая деталь.
 QUOTA_MINUTE_REPLY = (
-    "Сейчас обрабатываю несколько обращений сразу — ответьте, пожалуйста, "
-    "тем же сообщением через минуту, и я продолжу."
+    "Сейчас отвечаю сразу нескольким людям — напишите, пожалуйста, то же "
+    "самое через минуту, и я вернусь к вам."
 )
 QUOTA_DAY_REPLY = (
-    "Сегодня я уже не смогу ответить — консультации на сегодня закрыты. "
-    "Оставьте, пожалуйста, имя и контакт (телефон или @username), "
-    "и менеджер свяжется с вами в ближайший рабочий день."
+    "На сегодня я уже не успею ответить сама. Оставьте, пожалуйста, имя и "
+    "контакт (телефон или @username) — менеджер свяжется с вами в ближайший "
+    "рабочий день."
 )
 
 # Голосовой режим выключен через VOICE_ENABLED=0.
 VOICE_UNAVAILABLE_REPLY = (
-    "Голосовые сообщения сейчас не обрабатываю. Напишите, пожалуйста, текстом — "
-    "отвечу сразу."
+    "Голосовые пока не слушаю — напишите текстом, отвечу сразу же."
 )
 VOICE_FAILED_REPLY = (
-    "Не получилось разобрать голосовое. Попробуйте записать ещё раз или "
+    "Не расслышала — попробуйте, пожалуйста, ещё раз голосом или просто "
     "напишите текстом."
 )
 
@@ -86,10 +85,9 @@ VOICE_FAILED_REPLY = (
 _user_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 WELCOME = (
-    "Здравствуйте! Это {name} — {focus}.\n\n"
-    "Помогу разобраться с ВНЖ, пропиской, социальной картой, счётом в банке, "
-    "гражданством и визами.\n\n"
-    "Расскажите, что вам нужно, — подскажу порядок действий и сроки."
+    "Здравствуйте! Я — {name}, помогаю с переездом и документами в Армении: "
+    "ВНЖ, прописка, соцкарта, счета, гражданство, визы.\n\n"
+    "Расскажите вашу ситуацию — вместе разберёмся, что делать и в какие сроки."
 )
 
 HELP = (
@@ -99,7 +97,8 @@ HELP = (
     "<b>Команды:</b>\n"
     "/start — начать заново\n"
     "/help — эта справка\n"
-    "/reset — очистить историю диалога\n\n"
+    "/reset — очистить историю диалога\n"
+    "/human — позвать оператора-человека\n\n"
     "Просто напишите вопрос своими словами — этого достаточно."
 )
 
@@ -117,9 +116,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await db.upsert_user(user.id, chat.id, user.username, user.first_name)
     logger.info("Старт диалога: user_id=%s username=%s", user.id, user.username)
-    await update.message.reply_text(
-        WELCOME.format(name=COMPANY["name"], focus=COMPANY["focus"].lower())
-    )
+    await update.message.reply_text(WELCOME.format(name=COMPANY["name"]))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -136,7 +133,58 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await db.reset_conversation(user.id)
     logger.info("История очищена: user_id=%s", user.id)
-    await update.message.reply_text("История диалога очищена. Начнём заново — чем помочь?")
+    await update.message.reply_text("Хорошо, начинаем с чистого листа. Расскажите, что у вас за ситуация?")
+
+
+async def human_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/human — клиент сам зовёт оператора. Ставит бота на паузу для этого чата."""
+    message = update.message
+    user, chat = update.effective_user, update.effective_chat
+    if not message or not user or not chat:
+        return
+
+    await db.upsert_user(user.id, chat.id, user.username, user.first_name)
+    await db.set_paused(user.id, True)
+    logger.info("Клиент вызвал оператора (/human): user_id=%s", user.id)
+
+    recent = await db.get_history(user.id, limit=ESCALATION_HISTORY_SIZE)
+    await _notify_manager(
+        context,
+        format_escalation_notification(
+            "Клиент нажал /human — просит оператора",
+            [(m.role, m.content) for m in recent],
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+        ),
+    )
+
+    await message.reply_text(
+        "Передала ваш запрос менеджеру, он подключится в ближайшее время. "
+        "Можете написать что-то ещё — я всё передам."
+    )
+
+
+async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/resume <user_id> — снимает паузу после /human. Только в чате менеджеров."""
+    chat = update.effective_chat
+    message = update.message
+    if not chat or not message or chat.id != context.application.bot_data.get("manager_chat_id"):
+        return
+
+    if not context.args:
+        await message.reply_text("Укажите user_id: /resume 123456789 (он есть в карточке выше).")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await message.reply_text("user_id должен быть числом — возьмите его из карточки клиента.")
+        return
+
+    await db.set_paused(target_id, False)
+    logger.info("Пауза снята менеджером: user_id=%s", target_id)
+    await message.reply_text(f"Готово, бот снова отвечает пользователю {target_id}.")
 
 
 # --------------------------------------------------------------------------- #
@@ -180,6 +228,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     async with _user_locks[user.id]:
         await db.upsert_user(user.id, chat.id, user.username, user.first_name)
         await db.add_message(user.id, "user", text)
+
+        if await db.is_paused(user.id):
+            # Клиент уже вызвал оператора (/human) — сообщение сохранено в
+            # историю для контекста, но модель не дёргаем: ждём /resume.
+            return
 
         history = await db.get_history(user.id, limit=HISTORY_LIMIT)
 
@@ -255,6 +308,12 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         await db.add_message(user.id, "user", user_text)
+
+        if await db.is_paused(user.id):
+            # См. message_handler — клиент уже вызвал оператора через /human.
+            indicator.cancel()
+            return
+
         history = await db.get_history(user.id, limit=HISTORY_LIMIT)
 
         chat_client: OpenAIChatClient = context.application.bot_data["chat"]
@@ -309,8 +368,9 @@ async def non_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Фото, документы, видео — просим написать текстом."""
     if update.message:
         await update.message.reply_text(
-            "Пока я понимаю текст и голосовые сообщения. Опишите, пожалуйста, "
-            "вопрос сообщением — а документы можно будет передать менеджеру."
+            "Файлы пока не открываю, только текст и голос — опишите в двух "
+            "словах, что у вас за вопрос, а документы передадим менеджеру, "
+            "когда понадобится."
         )
 
 
@@ -327,7 +387,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="Что-то пошло не так на моей стороне. Попробуйте, пожалуйста, ещё раз.",
+                text="Что-то не задалось с моей стороны — повторите, пожалуйста, ещё раз, сейчас отвечу.",
             )
         except TelegramError:
             logger.warning("Не удалось отправить сообщение об ошибке пользователю")

@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS users (
     first_name      TEXT,
     created_at      TEXT NOT NULL,
     last_message_at TEXT NOT NULL,
-    followup_sent   INTEGER NOT NULL DEFAULT 0
+    followup_sent   INTEGER NOT NULL DEFAULT 0,
+    paused          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS conversations (
@@ -169,6 +170,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if lead_columns and "card" not in lead_columns:
         conn.execute("ALTER TABLE leads ADD COLUMN card TEXT")
         logger.info("Миграция: в leads добавлена колонка card")
+
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if user_columns and "paused" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+        logger.info("Миграция: в users добавлена колонка paused")
 
 
 def _close_sync() -> None:
@@ -321,6 +327,21 @@ async def mark_followup_sent(user_id: int) -> None:
     await asyncio.to_thread(
         _execute, "UPDATE users SET followup_sent = 1 WHERE user_id = ?", (user_id,)
     )
+
+
+async def set_paused(user_id: int, value: bool) -> None:
+    """Ставит/снимает паузу — пока она активна, бот не отвечает автоматически."""
+    await asyncio.to_thread(
+        _execute, "UPDATE users SET paused = ? WHERE user_id = ?", (int(value), user_id)
+    )
+
+
+async def is_paused(user_id: int) -> bool:
+    """True, если для пользователя включена ручная пауза (ждём оператора)."""
+    rows = await asyncio.to_thread(
+        _query, "SELECT paused FROM users WHERE user_id = ?", (user_id,)
+    )
+    return bool(rows and rows[0]["paused"])
 
 
 async def reset_conversation(user_id: int) -> None:

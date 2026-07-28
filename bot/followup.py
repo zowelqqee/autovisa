@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 FOLLOWUP_HOURS = int(os.getenv("FOLLOWUP_HOURS", "6"))
 FOLLOWUP_INTERVAL_MINUTES = int(os.getenv("FOLLOWUP_INTERVAL_MINUTES", "15"))
 
-FOLLOWUP_TEXT = "Остались вопросы? Я на связи 🙂"
+FOLLOWUP_TEXT = "Как продвигается ваш вопрос? Если что-то ещё нужно — я на связи."
 
 _scheduler: Optional[AsyncIOScheduler] = None
 

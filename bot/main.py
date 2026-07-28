@@ -14,6 +14,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
+from telegram import BotCommand, BotCommandScopeChat
 from telegram.ext import (
     AIORateLimiter,
     Application,
@@ -29,9 +30,11 @@ from .followup import shutdown_scheduler, start_scheduler
 from .handlers import (
     error_handler,
     help_command,
+    human_command,
     message_handler,
     non_text_handler,
     reset_command,
+    resume_command,
     start_command,
     stats_command,
     voice_handler,
@@ -95,6 +98,24 @@ async def on_startup(application: Application) -> None:
 
     start_scheduler(application)
 
+    client_commands = [
+        BotCommand("start", "начать заново"),
+        BotCommand("help", "справка и список услуг"),
+        BotCommand("reset", "очистить историю диалога"),
+        BotCommand("human", "позвать оператора-человека"),
+    ]
+    await application.bot.set_my_commands(client_commands)
+
+    manager_chat_id = application.bot_data.get("manager_chat_id")
+    if manager_chat_id:
+        await application.bot.set_my_commands(
+            client_commands + [
+                BotCommand("resume", "снять паузу: /resume <user_id>"),
+                BotCommand("stats", "расход запросов и токенов"),
+            ],
+            scope=BotCommandScopeChat(chat_id=manager_chat_id),
+        )
+
     me = await application.bot.get_me()
     logger.info("Бот запущен: @%s (id=%s)", me.username, me.id)
 
@@ -135,6 +156,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CommandHandler("human", human_command))
+    application.add_handler(CommandHandler("resume", resume_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, message_handler)
