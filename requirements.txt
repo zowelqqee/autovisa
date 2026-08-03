@@ -13,6 +13,10 @@ APScheduler>=3.10,<4.0
 # Загрузка секретов из .env
 python-dotenv>=1.0.0
 
+# Google Sheets CRM через service account.
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+
 # SQLite — stdlib (sqlite3), внешних зависимостей не требует.
 # Блокирующие вызовы обёрнуты в asyncio.to_thread (см. bot/db.py).
 #

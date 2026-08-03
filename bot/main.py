@@ -27,6 +27,7 @@ from telegram.request import HTTPXRequest
 
 from . import db
 from .followup import shutdown_scheduler, start_scheduler
+from .google_sheets import GoogleSheetsCRM
 from .handlers import (
     error_handler,
     help_command,
@@ -71,6 +72,10 @@ def require_env(name: str) -> str:
 async def on_startup(application: Application) -> None:
     """Инициализация БД, клиентов OpenAI и планировщика follow-up."""
     await db.init_db()
+
+    # Интеграция необязательна: при отсутствии service-account настроек бот
+    # продолжает работать как раньше, а подробная инструкция есть в README.
+    application.bot_data["crm"] = GoogleSheetsCRM.from_env()
 
     chat = OpenAIChatClient()
     application.bot_data["chat"] = chat

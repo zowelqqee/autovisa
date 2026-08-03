@@ -1,4 +1,7 @@
 .env
+# JSON-ключ service account — никогда не добавлять в Git.
+google-service-account.json
+credentials/
 *.db
 *.db-wal
 *.db-shm

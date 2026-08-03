@@ -97,6 +97,18 @@ CREATE TABLE IF NOT EXISTS leads (
 
 CREATE INDEX IF NOT EXISTS idx_leads_user ON leads (user_id);
 
+-- В CRM нет колонки с Telegram user_id, поэтому техническая привязка к строке
+-- Google Sheets хранится отдельно. Это позволяет обновлять повторный лид, а
+-- не создавать дубль, и не раскрывать user_id сотрудникам в CRM-колонках.
+CREATE TABLE IF NOT EXISTS crm_rows (
+    user_id        INTEGER NOT NULL,
+    spreadsheet_id TEXT NOT NULL,
+    worksheet      TEXT NOT NULL,
+    row_number     INTEGER NOT NULL,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (user_id, spreadsheet_id, worksheet)
+);
+
 -- Журнал обращений к OpenAI API: сколько запросов и токенов израсходовано.
 -- Лежит в БД, чтобы статистика переживала перезапуск процесса.
 -- `tokens` заполняется уже после ответа модели (до запроса расход неизвестен).
@@ -293,6 +305,33 @@ async def has_lead(user_id: int) -> bool:
         _query, "SELECT 1 FROM leads WHERE user_id = ? LIMIT 1", (user_id,)
     )
     return bool(rows)
+
+
+async def get_crm_row(user_id: int, spreadsheet_id: str, worksheet: str) -> Optional[int]:
+    """Возвращает строку CRM для Telegram-пользователя, если она уже создана."""
+    rows = await asyncio.to_thread(
+        _query,
+        "SELECT row_number FROM crm_rows WHERE user_id = ? AND spreadsheet_id = ? AND worksheet = ?",
+        (user_id, spreadsheet_id, worksheet),
+    )
+    return int(rows[0]["row_number"]) if rows else None
+
+
+async def save_crm_row(
+    user_id: int, spreadsheet_id: str, worksheet: str, row_number: int
+) -> None:
+    """Сохраняет привязку Telegram user_id к строке CRM после успешного append."""
+    await asyncio.to_thread(
+        _execute,
+        """
+        INSERT INTO crm_rows (user_id, spreadsheet_id, worksheet, row_number, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, spreadsheet_id, worksheet) DO UPDATE SET
+            row_number = excluded.row_number,
+            updated_at = excluded.updated_at
+        """,
+        (user_id, spreadsheet_id, worksheet, row_number, _utcnow()),
+    )
 
 
 async def get_stale_users(hours: int) -> list[StaleUser]:

@@ -443,6 +443,16 @@ async def _handle_tags(
             context=parsed.lead.context,
             card=parsed.lead.extras(),
         )
+        crm = context.application.bot_data.get("crm")
+        if crm is not None:
+            # Google API может быть временно недоступен. upsert_lead сам
+            # логирует ошибку и не бросает исключение: клиентский ответ и
+            # сохранённые в SQLite сообщение/лид от этого не страдают.
+            await crm.upsert_lead(
+                user_id=user.id,
+                lead=parsed.lead,
+                fallback_name=user.first_name,
+            )
         await _notify_manager(
             context,
             format_lead_notification(
